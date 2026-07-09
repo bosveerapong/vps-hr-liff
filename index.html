@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>แจ้งลางาน - VPS HR</title>
+<style>
+  :root {
+    --primary: #1e40af;
+    --primary-light: #3b82f6;
+    --danger: #ef4444;
+    --success: #10b981;
+    --bg: #f0f4f8;
+    --card: #ffffff;
+    --text: #1e293b;
+    --muted: #64748b;
+    --border: #e2e8f0;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Sarabun', sans-serif; background:var(--bg); color:var(--text); }
+
+  .header {
+    background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 50%, #2563eb 100%);
+    color:#fff; padding:18px 20px;
+  }
+  .header h1 { font-size:18px; font-weight:700; }
+  .header p  { font-size:12px; opacity:.8; margin-top:2px; }
+
+  .container { max-width:520px; margin:0 auto; padding:16px; }
+  .card {
+    background:var(--card); border-radius:14px; padding:18px;
+    box-shadow:0 2px 8px rgba(0,0,0,.06); border:1px solid var(--border);
+    margin-bottom:14px;
+  }
+  label { display:block; font-size:13px; font-weight:600; color:var(--text); margin-bottom:6px; }
+  .field { margin-bottom:16px; }
+  .hint  { font-size:11px; color:var(--muted); margin-top:4px; }
+
+  input[type=text], input[type=number], input[type=date], select, textarea {
+    width:100%; border:1px solid var(--border); border-radius:8px; padding:10px 12px;
+    font-size:14px; font-family:inherit; background:#fff; color:var(--text); outline:none;
+  }
+  input:focus, select:focus, textarea:focus { border-color:var(--primary-light); }
+  textarea { resize:vertical; min-height:70px; }
+
+  .row2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .radio-group { display:flex; gap:16px; }
+  .radio-group label { display:flex; align-items:center; gap:6px; font-weight:400; margin-bottom:0; }
+  .radio-group input { width:auto; }
+
+  .emp-list { max-height:180px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; margin-top:8px; }
+  .emp-opt { padding:10px 12px; font-size:13px; cursor:pointer; border-bottom:1px solid #f1f5f9; }
+  .emp-opt:last-child { border-bottom:none; }
+  .emp-opt:hover { background:#eff6ff; }
+  .emp-selected-box {
+    display:flex; justify-content:space-between; align-items:center;
+    padding:10px 12px; border-radius:8px; background:#eff6ff; border:1px solid var(--primary-light);
+    font-size:13px;
+  }
+  .emp-selected-box button { border:none; background:none; color:var(--primary); font-size:12px; cursor:pointer; text-decoration:underline; }
+
+  .btn {
+    width:100%; padding:13px; border-radius:10px; border:none; cursor:pointer;
+    font-size:15px; font-weight:700; background:var(--primary); color:#fff;
+  }
+  .btn:disabled { background:#94a3b8; cursor:not-allowed; }
+
+  .msg { text-align:center; padding:40px 20px; }
+  .msg .icon { font-size:44px; display:block; margin-bottom:12px; }
+  .msg.error .icon { color:var(--danger); }
+  .msg.success .icon { color:var(--success); }
+  .error-text { color:var(--danger); font-size:12px; margin-top:6px; }
+
+  .spinner-wrap { display:flex; justify-content:center; padding:60px 0; }
+  .spinner {
+    width:36px; height:36px; border:4px solid var(--border);
+    border-top-color:var(--primary); border-radius:50%;
+    animation:spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform:rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>📋 แจ้งลางาน</h1>
+  <p>V.P.S. Equipment Co., Ltd — ฝ่ายบุคคล</p>
+</div>
+
+<div class="container" id="app">
+  <div class="spinner-wrap"><div class="spinner"></div></div>
+</div>
+
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script>
+// ⚠️ ต้องแทนที่ด้วย LIFF ID จริงหลังลงทะเบียน LIFF app ใน LINE Developers Console
+const LIFF_ID = '2010655712-EK4EbK1O';
+
+// Apps Script Web App exec URL — this now serves as a JSON API only
+// (?action=bootstrap / ?action=submitLeave), the actual form page lives here instead.
+const WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbwxej2tW4u3waafsrV1c_2Q3H4GwbmjHFQuY_qsrSVILwU7Y-SN_8QSON71sxdzg43J7Q/exec';
+
+const LEAVE_TYPES = [
+  { value:'sick',     label:'ลาป่วย' },
+  { value:'personal', label:'ลากิจ' },
+  { value:'vacation', label:'ลาพักร้อน' },
+  { value:'lwp',      label:'ลาไม่รับค่าจ้าง' },
+  { value:'other',    label:'อื่นๆ (อุปสมบท / คลอด / อื่นๆ)' },
+];
+
+let lineUserId = null;
+let selectedEmp = null;   // { id, name, dept }
+let employeeList = [];
+
+function showError(message) {
+  document.getElementById('app').innerHTML = `
+    <div class="card msg error">
+      <span class="icon">⚠️</span>
+      <p>${message}</p>
+    </div>`;
+}
+
+// ─── Boot ───────────────────────────────────────────────────
+liff.init({ liffId: LIFF_ID })
+  .then(() => {
+    if (!liff.isLoggedIn()) { liff.login(); return; }
+    return liff.getProfile();
+  })
+  .then(profile => {
+    if (!profile) return;
+    lineUserId = profile.userId;
+    return fetch(`${WEBAPP_URL}?action=bootstrap&userId=${encodeURIComponent(lineUserId)}`);
+  })
+  .then(res => res && res.json())
+  .then(data => { if (data) onBootstrap(data); })
+  .catch(err => showError('เปิดฟอร์มไม่สำเร็จ: ' + err.message));
+
+function onBootstrap(data) {
+  if (data.employee) {
+    selectedEmp = data.employee;
+  } else {
+    employeeList = data.employeeList || [];
+  }
+  renderForm();
+}
+
+// ─── Render ─────────────────────────────────────────────────
+function renderForm() {
+  const empSectionHtml = selectedEmp
+    ? `<div class="emp-selected-box">
+         <span>👤 ${selectedEmp.name} (${selectedEmp.dept || '—'})</span>
+         <button type="button" onclick="clearSelectedEmp()">เปลี่ยน</button>
+       </div>`
+    : `<input type="text" id="empSearch" placeholder="🔍 พิมพ์ชื่อของคุณ..." oninput="renderEmpOptions()">
+       <div class="emp-list" id="empList"></div>`;
+
+  document.getElementById('app').innerHTML = `
+    <div class="card">
+      <div class="field">
+        <label>ชื่อ - นามสกุล</label>
+        ${empSectionHtml}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="field">
+        <label>ประเภทการลา</label>
+        <select id="leaveType" onchange="onTypeChange()">
+          ${LEAVE_TYPES.map(t => `<option value="${t.value}">${t.label}</option>`).join('')}
+        </select>
+      </div>
+
+      <div class="field">
+        <label>ลักษณะการลา</label>
+        <div class="radio-group">
+          <label><input type="radio" name="mode" value="full" checked onchange="onModeChange()"> เต็มวัน</label>
+          <label><input type="radio" name="mode" value="hourly" onchange="onModeChange()"> ลาเป็นชั่วโมง</label>
+        </div>
+      </div>
+
+      <div class="row2">
+        <div class="field">
+          <label>จากวันที่</label>
+          <input type="date" id="fromDate" onchange="onDateChange()">
+        </div>
+        <div class="field" id="toDateField">
+          <label>ถึงวันที่</label>
+          <input type="date" id="toDate" onchange="onDateChange()">
+        </div>
+      </div>
+
+      <div class="field" id="hoursField" style="display:none">
+        <label>จำนวนชั่วโมงที่ลา</label>
+        <input type="number" id="hours" min="0.5" max="8" step="0.5" oninput="onDateChange()">
+      </div>
+
+      <div class="field">
+        <label>จำนวนวันที่ใช้สิทธิ์</label>
+        <input type="number" id="days" min="0" step="0.01">
+        <div class="hint">คำนวณให้อัตโนมัติ แก้ไขเองได้ถ้าไม่ตรง</div>
+      </div>
+
+      <div class="field" id="certField" style="display:none">
+        <label>เลขใบรับรองแพทย์ (ถ้ามี)</label>
+        <input type="text" id="certNumber" placeholder="เช่น 2857425">
+      </div>
+
+      <div class="field">
+        <label>เหตุผลในการลา</label>
+        <textarea id="reason" placeholder="ระบุเหตุผล..."></textarea>
+      </div>
+
+      <div id="formError" class="error-text"></div>
+      <button class="btn" id="submitBtn" onclick="onSubmit()">ส่งข้อมูลการลา</button>
+    </div>
+  `;
+
+  if (!selectedEmp) renderEmpOptions();
+  onModeChange();
+
+  const today = new Date().toISOString().slice(0, 10);
+  document.getElementById('fromDate').value = today;
+  document.getElementById('toDate').value   = today;
+  onDateChange();
+}
+
+function renderEmpOptions() {
+  const q = (document.getElementById('empSearch')?.value || '').toLowerCase();
+  const list = employeeList.filter(e => !q || e.name.toLowerCase().includes(q));
+  const el = document.getElementById('empList');
+  if (!el) return;
+  el.innerHTML = list.slice(0, 50).map(e =>
+    `<div class="emp-opt" onclick='selectEmp(${JSON.stringify(e)})'>${e.name} <span style="color:var(--muted);font-size:11px">(${e.dept || '—'})</span></div>`
+  ).join('') || `<div class="emp-opt" style="color:var(--muted)">ไม่พบชื่อ</div>`;
+}
+
+function selectEmp(emp) {
+  selectedEmp = emp;
+  renderForm();
+}
+
+function clearSelectedEmp() {
+  selectedEmp = null;
+  renderForm();
+}
+
+function onTypeChange() {
+  const type = document.getElementById('leaveType').value;
+  document.getElementById('certField').style.display = (type === 'sick') ? 'block' : 'none';
+}
+
+function onModeChange() {
+  const mode = document.querySelector('input[name=mode]:checked').value;
+  const hourly = mode === 'hourly';
+  document.getElementById('hoursField').style.display = hourly ? 'block' : 'none';
+  document.getElementById('toDateField').style.display = hourly ? 'none' : 'block';
+  if (hourly) {
+    document.getElementById('toDate').value = document.getElementById('fromDate').value;
+  }
+  onDateChange();
+}
+
+function onDateChange() {
+  const mode = document.querySelector('input[name=mode]:checked').value;
+  const fromVal = document.getElementById('fromDate').value;
+  const daysInput = document.getElementById('days');
+
+  if (mode === 'hourly') {
+    document.getElementById('toDate').value = fromVal;
+    const hours = Number(document.getElementById('hours').value || 0);
+    daysInput.value = hours > 0 ? Math.round((hours / 8) * 100) / 100 : '';
+    return;
+  }
+
+  const toVal = document.getElementById('toDate').value || fromVal;
+  if (!fromVal || !toVal) return;
+  const from = new Date(fromVal);
+  const to   = new Date(toVal);
+  const diffDays = Math.round((to - from) / 86400000) + 1;
+  daysInput.value = diffDays > 0 ? diffDays : '';
+}
+
+function onSubmit() {
+  const errEl = document.getElementById('formError');
+  errEl.textContent = '';
+
+  if (!selectedEmp) { errEl.textContent = 'กรุณาเลือกชื่อของคุณ'; return; }
+
+  const leaveType  = document.getElementById('leaveType').value;
+  const fromDate   = document.getElementById('fromDate').value;
+  const toDate     = document.getElementById('toDate').value;
+  const days       = Number(document.getElementById('days').value);
+  const reason     = document.getElementById('reason').value.trim();
+  const certNumber = document.getElementById('certNumber').value.trim();
+
+  if (!fromDate) { errEl.textContent = 'กรุณาระบุวันที่ลา'; return; }
+  if (!days || days <= 0) { errEl.textContent = 'กรุณาระบุจำนวนวัน/ชั่วโมงที่ลา'; return; }
+  if (!reason) { errEl.textContent = 'กรุณาระบุเหตุผลในการลา'; return; }
+
+  const btn = document.getElementById('submitBtn');
+  btn.disabled = true;
+  btn.textContent = 'กำลังบันทึก...';
+
+  fetch(`${WEBAPP_URL}?action=submitLeave`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({
+      lineUserId, empId: selectedEmp.id, leaveType,
+      fromDate, toDate, days, reason, certNumber,
+    }),
+  })
+    .then(res => res.json())
+    .then(result => {
+      if (result.ok) { onSubmitSuccess(); return; }
+      btn.disabled = false;
+      btn.textContent = 'ส่งข้อมูลการลา';
+      errEl.textContent = result.error || 'เกิดข้อผิดพลาด กรุณาลองใหม่';
+    })
+    .catch(err => {
+      btn.disabled = false;
+      btn.textContent = 'ส่งข้อมูลการลา';
+      errEl.textContent = err.message;
+    });
+}
+
+function onSubmitSuccess() {
+  document.getElementById('app').innerHTML = `
+    <div class="card msg success">
+      <span class="icon">✅</span>
+      <p>บันทึกข้อมูลการลาเรียบร้อยแล้ว</p>
+      <p class="hint">ปิดหน้าต่างนี้ได้เลย</p>
+    </div>`;
+}
+</script>
+</body>
+</html>
