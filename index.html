@@ -100,6 +100,8 @@ const LIFF_ID = '2010655712-EK4EbK1O';
 // (?action=bootstrap / ?action=submitLeave), the actual form page lives here instead.
 const WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbwxej2tW4u3waafsrV1c_2Q3H4GwbmjHFQuY_qsrSVILwU7Y-SN_8QSON71sxdzg43J7Q/exec';
 
+const HOURS_PER_DAY = 8;
+
 const LEAVE_TYPES = [
   { value:'sick',     label:'ลาป่วย' },
   { value:'personal', label:'ลากิจ' },
@@ -142,6 +144,23 @@ function onBootstrap(data) {
     employeeList = data.employeeList || [];
   }
   renderForm();
+}
+
+// ─── Time picker helpers (always 24-hour, no AM/PM ambiguity) ─
+function hourOptions() {
+  return Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
+}
+function minuteOptions() {
+  return ['00', '15', '30', '45'];
+}
+function timeSelectOptions(values) {
+  return `<option value="" disabled selected>--</option>` +
+    values.map(v => `<option value="${v}">${v}</option>`).join('');
+}
+function readTime(hourId, minuteId) {
+  const h = document.getElementById(hourId).value;
+  const m = document.getElementById(minuteId).value;
+  return (h !== '' && m !== '') ? `${h}:${m}` : '';
 }
 
 // ─── Render ─────────────────────────────────────────────────
@@ -189,24 +208,32 @@ function renderForm() {
         </div>
       </div>
 
+      <div class="field">
+        <label id="daysLabel">จำนวนวันที่ใช้สิทธิ์</label>
+        <input type="number" id="days" min="0" step="0.01">
+        <div class="hint">คำนวณให้อัตโนมัติ แก้ไขเองได้ถ้าไม่ตรง</div>
+      </div>
+
       <div class="field" id="hoursField" style="display:none">
         <label>เวลาที่ลา</label>
         <div class="row2">
           <div>
             <label style="font-weight:400;font-size:12px">เวลาเริ่ม</label>
-            <input type="time" id="fromTime" onchange="onDateChange()">
+            <div style="display:flex;gap:6px;align-items:center">
+              <select id="fromHour" onchange="onDateChange()">${timeSelectOptions(hourOptions())}</select>
+              <span>:</span>
+              <select id="fromMinute" onchange="onDateChange()">${timeSelectOptions(minuteOptions())}</select>
+            </div>
           </div>
           <div>
             <label style="font-weight:400;font-size:12px">เวลาสิ้นสุด</label>
-            <input type="time" id="toTime" onchange="onDateChange()">
+            <div style="display:flex;gap:6px;align-items:center">
+              <select id="toHour" onchange="onDateChange()">${timeSelectOptions(hourOptions())}</select>
+              <span>:</span>
+              <select id="toMinute" onchange="onDateChange()">${timeSelectOptions(minuteOptions())}</select>
+            </div>
           </div>
         </div>
-      </div>
-
-      <div class="field">
-        <label>จำนวนวันที่ใช้สิทธิ์</label>
-        <input type="number" id="days" min="0" step="0.01">
-        <div class="hint">คำนวณให้อัตโนมัติ แก้ไขเองได้ถ้าไม่ตรง</div>
       </div>
 
       <div class="field" id="certField" style="display:none">
@@ -263,6 +290,7 @@ function onModeChange() {
   const hourly = mode === 'hourly';
   document.getElementById('hoursField').style.display = hourly ? 'block' : 'none';
   document.getElementById('toDateField').style.display = hourly ? 'none' : 'block';
+  document.getElementById('daysLabel').textContent = hourly ? 'จำนวนชั่วโมงที่ใช้สิทธิ์ลา' : 'จำนวนวันที่ใช้สิทธิ์';
   if (hourly) {
     document.getElementById('toDate').value = document.getElementById('fromDate').value;
   }
@@ -276,15 +304,17 @@ function onDateChange() {
 
   if (mode === 'hourly') {
     document.getElementById('toDate').value = fromVal;
-    const fromTime = document.getElementById('fromTime').value;
-    const toTime   = document.getElementById('toTime').value;
+    const fromTime = readTime('fromHour', 'fromMinute');
+    const toTime   = readTime('toHour', 'toMinute');
     let hours = 0;
     if (fromTime && toTime) {
       const [fh, fm] = fromTime.split(':').map(Number);
       const [th, tm] = toTime.split(':').map(Number);
       hours = Math.max(0, (th + tm / 60) - (fh + fm / 60));
     }
-    daysInput.value = hours > 0 ? Math.round((hours / 8) * 100) / 100 : '';
+    // Field shows/edits HOURS directly in this mode (relabeled in
+    // onModeChange) — converted to days only at submit time.
+    daysInput.value = hours > 0 ? Math.round(hours * 100) / 100 : '';
     return;
   }
 
@@ -302,20 +332,24 @@ function onSubmit() {
 
   if (!selectedEmp) { errEl.textContent = 'กรุณาเลือกชื่อของคุณ'; return; }
 
-  const mode       = document.querySelector('input[name=mode]:checked').value;
-  const leaveType  = document.getElementById('leaveType').value;
-  const fromDate   = document.getElementById('fromDate').value;
-  const toDate     = document.getElementById('toDate').value;
-  const days       = Number(document.getElementById('days').value);
-  const reasonText = document.getElementById('reason').value.trim();
-  const certNumber = document.getElementById('certNumber').value.trim();
-  const fromTime   = document.getElementById('fromTime').value;
-  const toTime     = document.getElementById('toTime').value;
+  const mode        = document.querySelector('input[name=mode]:checked').value;
+  const leaveType   = document.getElementById('leaveType').value;
+  const fromDate    = document.getElementById('fromDate').value;
+  const toDate      = document.getElementById('toDate').value;
+  const daysOrHours = Number(document.getElementById('days').value);
+  const reasonText  = document.getElementById('reason').value.trim();
+  const certNumber  = document.getElementById('certNumber').value.trim();
+  const fromTime    = readTime('fromHour', 'fromMinute');
+  const toTime      = readTime('toHour', 'toMinute');
 
   if (!fromDate) { errEl.textContent = 'กรุณาระบุวันที่ลา'; return; }
   if (mode === 'hourly' && (!fromTime || !toTime)) { errEl.textContent = 'กรุณาระบุเวลาเริ่มและเวลาสิ้นสุด'; return; }
-  if (!days || days <= 0) { errEl.textContent = 'กรุณาระบุจำนวนวัน/ชั่วโมงที่ลา'; return; }
+  if (!daysOrHours || daysOrHours <= 0) { errEl.textContent = 'กรุณาระบุจำนวนวัน/ชั่วโมงที่ลา'; return; }
   if (!reasonText) { errEl.textContent = 'กรุณาระบุเหตุผลในการลา'; return; }
+
+  // The "days" field shows/edits HOURS while in hourly mode (see
+  // onModeChange's relabel), so convert to days only right before sending.
+  const days = mode === 'hourly' ? daysOrHours / HOURS_PER_DAY : daysOrHours;
 
   // Sheet/LINE cards only have a single "เหตุผล" field, so the time range
   // rides along inside that text instead of needing a new column.
