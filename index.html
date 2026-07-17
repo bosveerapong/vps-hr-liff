@@ -190,8 +190,17 @@ function renderForm() {
       </div>
 
       <div class="field" id="hoursField" style="display:none">
-        <label>จำนวนชั่วโมงที่ลา</label>
-        <input type="number" id="hours" min="0.5" max="8" step="0.5" oninput="onDateChange()">
+        <label>เวลาที่ลา</label>
+        <div class="row2">
+          <div>
+            <label style="font-weight:400;font-size:12px">เวลาเริ่ม</label>
+            <input type="time" id="fromTime" onchange="onDateChange()">
+          </div>
+          <div>
+            <label style="font-weight:400;font-size:12px">เวลาสิ้นสุด</label>
+            <input type="time" id="toTime" onchange="onDateChange()">
+          </div>
+        </div>
       </div>
 
       <div class="field">
@@ -267,7 +276,14 @@ function onDateChange() {
 
   if (mode === 'hourly') {
     document.getElementById('toDate').value = fromVal;
-    const hours = Number(document.getElementById('hours').value || 0);
+    const fromTime = document.getElementById('fromTime').value;
+    const toTime   = document.getElementById('toTime').value;
+    let hours = 0;
+    if (fromTime && toTime) {
+      const [fh, fm] = fromTime.split(':').map(Number);
+      const [th, tm] = toTime.split(':').map(Number);
+      hours = Math.max(0, (th + tm / 60) - (fh + fm / 60));
+    }
     daysInput.value = hours > 0 ? Math.round((hours / 8) * 100) / 100 : '';
     return;
   }
@@ -286,16 +302,26 @@ function onSubmit() {
 
   if (!selectedEmp) { errEl.textContent = 'กรุณาเลือกชื่อของคุณ'; return; }
 
+  const mode       = document.querySelector('input[name=mode]:checked').value;
   const leaveType  = document.getElementById('leaveType').value;
   const fromDate   = document.getElementById('fromDate').value;
   const toDate     = document.getElementById('toDate').value;
   const days       = Number(document.getElementById('days').value);
-  const reason     = document.getElementById('reason').value.trim();
+  const reasonText = document.getElementById('reason').value.trim();
   const certNumber = document.getElementById('certNumber').value.trim();
+  const fromTime   = document.getElementById('fromTime').value;
+  const toTime     = document.getElementById('toTime').value;
 
   if (!fromDate) { errEl.textContent = 'กรุณาระบุวันที่ลา'; return; }
+  if (mode === 'hourly' && (!fromTime || !toTime)) { errEl.textContent = 'กรุณาระบุเวลาเริ่มและเวลาสิ้นสุด'; return; }
   if (!days || days <= 0) { errEl.textContent = 'กรุณาระบุจำนวนวัน/ชั่วโมงที่ลา'; return; }
-  if (!reason) { errEl.textContent = 'กรุณาระบุเหตุผลในการลา'; return; }
+  if (!reasonText) { errEl.textContent = 'กรุณาระบุเหตุผลในการลา'; return; }
+
+  // Sheet/LINE cards only have a single "เหตุผล" field, so the time range
+  // rides along inside that text instead of needing a new column.
+  const reason = mode === 'hourly'
+    ? `${reasonText} ลาตั้งแต่ ${fromTime}-${toTime}`
+    : reasonText;
 
   const btn = document.getElementById('submitBtn');
   btn.disabled = true;
