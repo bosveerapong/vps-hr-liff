@@ -162,6 +162,15 @@ function readTime(hourId, minuteId) {
   const m = document.getElementById(minuteId).value;
   return (h !== '' && m !== '') ? `${h}:${m}` : '';
 }
+// toISOString() always converts to UTC — between midnight and 7am Thailand
+// time that rolls back to yesterday's date. Build the string from the
+// browser's local date parts instead so "today" is always actually today.
+function todayLocalISO() {
+  const d = new Date();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+}
 
 // ─── Render ─────────────────────────────────────────────────
 function renderForm() {
@@ -254,7 +263,7 @@ function renderForm() {
   if (!selectedEmp) renderEmpOptions();
   onModeChange();
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayLocalISO();
   document.getElementById('fromDate').value = today;
   document.getElementById('toDate').value   = today;
   onDateChange();
